@@ -1,0 +1,2 @@
+/usr/bin/ar qc libCtrlZ.a CMakeFiles/CtrlZ.dir/Workers/NN/NetInferenceWorker.cpp.o
+/usr/bin/ranlib libCtrlZ.a
