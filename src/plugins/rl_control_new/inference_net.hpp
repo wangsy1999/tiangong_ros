@@ -11,7 +11,7 @@
 #include <thread>
 #include <typeinfo>
 
-#include "LLog.hpp"
+
 #include "ZenBuffer.hpp"
 #include "eigen3/Eigen/Dense"
 template <typename T = float> 
@@ -58,8 +58,8 @@ public:
 
 public:
   InferenceNet(const std::string &ctrl_model_path, NetConfigT &net_config,
-               bool async = false, int interpolate = -1,
-               lee::blocks::LLog<T> *logger = nullptr);
+               bool async = false, int interpolate = -1
+              );
 
   ~InferenceNet();
 
@@ -78,7 +78,7 @@ typename NetConfigT::OutputConfigT output_cfg;
   const int interpolate;
   const bool async;
 
-  lee::blocks::LLog<T> *logger;
+
 
   std::unique_ptr<std::thread> policy_thread;
   bool policy_thread_running;
@@ -121,7 +121,7 @@ private:
 
 public: // HACK: temporary public for testing, fix multi thread logging issue
         // later
-  void log_result();
+  
 
   T y_offset;
   T yaw_offset;
@@ -137,8 +137,8 @@ using float_inference_net = InferenceNet<float>;
 template <typename T>
 InferenceNet<T>::InferenceNet(const std::string &ctrl_model_path,
                               NetConfigT &net_config, bool async,
-                              int interpolate, lee::blocks::LLog<T> *logger)
-    : async(async), interpolate(interpolate), logger(logger),
+                              int interpolate)
+    : async(async), interpolate(interpolate), 
       policy_thread_running(false), runner_status(StatusT::STOPPED),
       input_cfg(net_config.input_config),
       start_time(std::chrono::system_clock::now()),
@@ -311,6 +311,7 @@ template <typename T> void InferenceNet<T>::run() {
 template <typename T> void InferenceNet<T>::perform_inference_erax() {
   this->start_time = std::chrono::system_clock::now();
   this->runner_status = StatusT::INFERRING;
+  
 
   torch::Tensor ctrl_net_input = this->history_input_ptr_erax->front();
   for (size_t i = 1; i < this->history_input_ptr_erax->size(); i++) {
@@ -340,13 +341,11 @@ template <typename T> void InferenceNet<T>::perform_inference_erax() {
   this->end_time =
       std::chrono::system_clock::now(); // HACK: fix multi thread logging
                                         // issue. temp add here
-  if (this->logger != nullptr) {
-    // NOTE: for time calculation accuracy, please do NOT add code after
-    // log_result this->log_result(); //HACK: fix multi thread logging issue.
-    // temp disable
-  }
 
+  // std::cout << "[DEBUG] action_tensor = " << this->action_tensor << std::endl;
+  
   this->runner_status = StatusT::FINISHED;
+
 }
 
 template <typename T> void InferenceNet<T>::perform_interpolation() {
@@ -369,66 +368,6 @@ template <typename T> void InferenceNet<T>::perform_interpolation() {
   }
 }
 
-template <typename T> void InferenceNet<T>::log_result() {
-  this->logger->addLog(this->base_ang_vel_tensor[0].item<T>(),
-                       "input_3_base_ang_velo_0");
-  this->logger->addLog(this->base_ang_vel_tensor[1].item<T>(),
-                       "input_4_base_ang_velo_1");
-  this->logger->addLog(this->base_ang_vel_tensor[2].item<T>(),
-                       "input_5_base_ang_velo_2");
 
-  this->logger->addLog(this->command_tensor[0].item<T>(), "input_9_command_0");
-  this->logger->addLog(this->command_tensor[1].item<T>(), "input_10_command_1");
-  this->logger->addLog(this->command_tensor[2].item<T>(), "input_11_command_2");
-
-  this->logger->addLog(this->dof_pos_obs_tensor[0].item<T>(),
-                       "input_12_dof_pos_0");
-  this->logger->addLog(this->dof_pos_obs_tensor[1].item<T>(),
-                       "input_13_dof_pos_1");
-  this->logger->addLog(this->dof_pos_obs_tensor[2].item<T>(),
-                       "input_14_dof_pos_2");
-  this->logger->addLog(this->dof_pos_obs_tensor[3].item<T>(),
-                       "input_15_dof_pos_3");
-  this->logger->addLog(this->dof_pos_obs_tensor[4].item<T>(),
-                       "input_16_dof_pos_4");
-  this->logger->addLog(this->dof_pos_obs_tensor[5].item<T>(),
-                       "input_17_dof_pos_5");
-
-  this->logger->addLog(this->dof_vel_obs_tensor[0].item<T>(),
-                       "input_18_dof_velo_obs_0");
-  this->logger->addLog(this->dof_vel_obs_tensor[1].item<T>(),
-                       "input_19_dof_velo_obs_1");
-  this->logger->addLog(this->dof_vel_obs_tensor[2].item<T>(),
-                       "input_20_dof_velo_obs_2");
-  this->logger->addLog(this->dof_vel_obs_tensor[3].item<T>(),
-                       "input_21_dof_velo_obs_3");
-  this->logger->addLog(this->dof_vel_obs_tensor[4].item<T>(),
-                       "input_22_dof_velo_obs_4");
-  this->logger->addLog(this->dof_vel_obs_tensor[5].item<T>(),
-                       "input_23_dof_velo_obs_5");
-
-  this->logger->addLog(this->last_action_tensor[0].item<T>(),
-                       "input_24_last_action_tensor_0");
-  this->logger->addLog(this->last_action_tensor[1].item<T>(),
-                       "input_25_last_action_tensor_1");
-  this->logger->addLog(this->last_action_tensor[2].item<T>(),
-                       "input_26_last_action_tensor_2");
-  this->logger->addLog(this->last_action_tensor[3].item<T>(),
-                       "input_27_last_action_tensor_3");
-  this->logger->addLog(this->last_action_tensor[4].item<T>(),
-                       "input_28_last_action_tensor_4");
-  this->logger->addLog(this->last_action_tensor[5].item<T>(),
-                       "input_29_last_action_tensor_5");
-
-  this->logger->addLog(this->clock_tensor[0].item<T>(), "input_42_clock_0");
-  this->logger->addLog(this->clock_tensor[1].item<T>(), "input_43_clock_1");
-  // this->logger->addLog(this->clock_tensor[2].item<T>(), "input_44_clock_2");
-  // this->logger->addLog(this->clock_tensor[3].item<T>(), "input_45_clock_3");
-
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-      this->end_time - this->start_time); // 微秒
-  int64_t count = (duration.count() < 0) ? 0 : duration.count();
-  this->logger->addLog(static_cast<T>(count), "net_inference_time");
-}
 
 #endif //__INFERENCE_NET_H__

@@ -27,6 +27,7 @@ struct st_interfaceInput {
     double imu[9];
     double commands[3];
     double kp[_JNT_NUM];
+    double kd[_JNT_NUM];
     double time;
     xbox_flag flag;
     st_jointsI jntI;
@@ -62,7 +63,7 @@ std::array<std::array<float, 6>, 2> default_position = {
      { 0.0, 0, -0.165647, 0.529741, -0.301101, 0.}}};  // right
 
 const float stance_T = 0.375;
-const float dt = 0.001;
+const float dt = 0.0025;
 Eigen::Matrix<float, 3, 1> projected_gravity_mat;
 const int policy_frequency = 10;
 float gravity_vec[3] = {0.0, 0.0, -1};
@@ -94,7 +95,7 @@ const float compensate_threshold[2][6] = {
     {1.0, 1.0, 1.0, 1.0, 1., 1.}};  // In rads
 
 int control_periods = 0;
-size_t run_ctrl_cnt = 0;
+size_t run_ctrl_cnt = 600;
 size_t start_delay_cnt = 500; 
 
 ParallelAnkle<float> left_ankle({.l_bar1 = 0.04,
@@ -207,18 +208,28 @@ public:
     }
     // run the control loop
     void run() {
-        // get observation: 算kf，得到关节端observation，imu等其他量在PolicyController里对齐
+        // Step 0: 从接口同步 PD 参数
+        for (int i = 0; i < 2; ++i) {
+            for (int j = 0; j < 6; ++j) {
+                int idx = i * 6 + j;
+                p_gains[i][j] = static_cast<float>(this->m_interface->input.kp[idx]);
+                d_gains[i][j] = static_cast<float>(this->m_interface->input.kd[idx]);  // 你也可以改成 this->m_interface->input.kd[idx]（如果有）
+            }
+        }
+    
+        // Step 1: 读取观测数据
         this->GetJointObservation();
-
-        // run the policy controller loop: 算出了关节端action输出
+    
+        // Step 2: 运行策略推理
         this->PolicyController(this->m_interface->input.time);
-
-        // get torque: 算ik，得到电机端目标
+    
+        // Step 3: 进行 IK + Torque 映射
         this->SetJointAction();
-
-        // set command: 电机端目标与天工的格式对齐
+    
+        // Step 4: 输出控制命令到接口
         this->GiveJointAction2Interface();
     }
+    
 
 private:
     st_interface * m_interface;
@@ -227,23 +238,23 @@ private:
     void InitPolicy() {
         // Action interpolation buffer
         action_interpolated = std::vector<std::vector<float>>(policy_frequency + 1,
-                                                              std::vector<float>(12));
+                                                              std::vector<float>(6));
         // Create the policy network instance
         // last 4000
         inference_net = std::make_unique<float_inference_net>(
-            "/home/huahui/Project/hhfc-bitbot/checkpoint/"
+            "/home/wsy/robot/test/rl_control_new/src/plugins/x_humanoid_rl_sdk/python_scripts/traced/"
             "policy_1.pt",     // control model  policy_202412271
             net_config,        // net config
             true,              // use async mode
             policy_frequency);  // policy frequency
-
+            std::cout << "[INFO] Controller initialized." << std::endl;
     }
-    // Policy controller loop: 还没替换
+    
     void PolicyController(uint64_t cur_time) {
-        CoM_angle[0] = this->m_interface->input.imu[2];  // 正确写法
-//imu->GetRoll();  // imu angle
-        CoM_angle[1] = this->m_interface->input.imu[1];  // 正确写法
-//imu->GetPitch();
+        CoM_angle[0] = this->m_interface->input.imu[2];  
+
+        CoM_angle[1] = this->m_interface->input.imu[1];  
+
         CoM_angle[2] = this->m_interface->input.imu[0];
       
         // This is sort of filter.
@@ -251,7 +262,7 @@ private:
         CoM_acc[0] = (std::abs(this->m_interface->input.imu[6]) > 50) 
              ? CoM_acc[0] 
              : this->m_interface->input.imu[6];
-//imu->GetAccX();
+
         CoM_acc[1] = (std::abs(this->m_interface->input.imu[7]) > 50) 
         ? CoM_acc[1] 
         : this->m_interface->input.imu[8];
@@ -293,7 +304,7 @@ private:
         static uint64_t init_policy_time = cur_time;
         if ((cur_time - init_policy_time) % policy_frequency == 0) {
             /*const float stance_T = 0.32;*/
-            /*const float stance_T = 0.40;*/
+            const float stance_T = 0.40;
 
         
             for (int i = 0; i < 2; i++) {
@@ -379,11 +390,18 @@ private:
             dof_vel_obs[11] = velo_filter_net[1][5](
                 joint_current_velocity[1][5]);  // Right ankle roll
         
-            // Euler angle
-            /*bool ok = inference_net->InferenceOnceErax(*/
-            /*    clock_input_vec, commands, dof_pos_obs, dof_vel_obs, last_action,*/
-            /*    base_ang_vel, eu_ang);*/
-            // Projected gravity
+            //     std::cout << "[dof_pos_obs]: ";
+            //     for (int i = 0; i < 6; ++i) {
+            //         std::cout << dof_pos_obs[i] << " ";
+            //     }
+            //     std::cout << std::endl;
+            
+            //     std::cout << "[dof_vel_obs]: ";
+            //     for (int i = 0; i < 6; ++i) {
+            //         std::cout << dof_vel_obs[i] << " ";
+            //     }
+            //     std::cout << std::endl;
+            // // Projected gravity
             
             commands = std::vector<float>(input.commands, input.commands + 3);
 
@@ -408,7 +426,7 @@ private:
             control_periods = 0;  // reset control periods when new target is generated
         
             // Log data into policy logger
-            inference_net->log_result();
+            
         }
     
         if (run_ctrl_cnt > start_delay_cnt) {
@@ -453,7 +471,7 @@ private:
     
         end_time = this->m_interface->input.time;
 
-        if (((float)(end_time - start_time) / CLOCKS_PER_SEC) > 0.001) {
+        if (((float)(end_time - start_time) / CLOCKS_PER_SEC) > 0.0025) {
         std::cout << "Calling time: "
                     << (float)(end_time - start_time) / CLOCKS_PER_SEC << "s"
                     << std::endl;
@@ -529,10 +547,6 @@ void GetJointObservation() {
                 }
             }
       
-        //log_result(0);
-      
-        // SetJointAction(); // 在外面搞
-        // SetJointTorque_User(); // bitbot框架的关节力矩下发，这里不用
     }
     // ik and fk: 还没替换
     void SetJointAction() {
@@ -563,6 +577,26 @@ void GetJointObservation() {
         motor_target_torque[0][5] = -left_tor_res[1];
         motor_target_torque[1][4] = -right_tor_res[1];
         motor_target_torque[1][5] = -right_tor_res[0];
+
+
+        // std::cout << "[DEBUG] motor_target_position:" << std::endl;
+// for (size_t i = 0; i < 2; ++i) {
+//     std::cout << "  Leg " << i << ": ";
+//     for (size_t j = 0; j < 6; ++j) {
+//         std::cout << motor_target_position[i][j] << " ";
+//     }
+//     std::cout << std::endl;
+// }
+
+// std::cout << "[DEBUG] motor_target_torque:" << std::endl;
+// for (size_t i = 0; i < 2; ++i) {
+//     std::cout << "  Leg " << i << ": ";
+//     for (size_t j = 0; j < 6; ++j) {
+//         std::cout << motor_target_torque[i][j] << " ";
+//     }
+//     std::cout << std::endl;
+// }
+
     }
 
 // ======================================================================
@@ -571,9 +605,9 @@ void GetJointObservation() {
 void GiveJointAction2Interface()
 {
     // 把两条腿 2×6 = 12 个目标打到连续数组中
-    for (int leg = 0; leg < 2; ++leg)
+    for (int leg = 0; leg < 1; leg++)
     {
-        for (int j = 0; j < 6; ++j)
+        for (int j = 0; j < 5; j++)
         {
             const int idx = leg * 6 + j;              // 线性索引
             const double q_des   = motor_target_position[leg][j];
