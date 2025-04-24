@@ -1,3 +1,12 @@
+/**
+ * @file RLControlDIY.cpp
+ * @author Siyuan Wang
+ * @brief  RLControlDIY 用于在天工lite上实现开放的强化学习控制器
+ * @date 2025-04-18
+ *
+ * @copyright Copyright (c) 2025
+ *
+ */
 #include <pluginlib/class_list_macros.h>
 #include <nodelet/nodelet.h>
 #include <ros/ros.h>
@@ -28,7 +37,7 @@
 #include <geometry_msgs/Twist.h>
 #include "interfaceBitbotNet.hpp"
 #include "interfaceHeaders.h"
-#include "LLog.hpp"
+
 
 #define DATALOG_MAIN
 
@@ -220,7 +229,7 @@ class RLControlDIY : public nodelet::Nodelet {
     long count = 0;
     double t_now = 0;
     double dt = 0.001;
-
+    const double torque_limit = 100.0;  // 例如最大允许力矩为 60 Nm，根据实际电机能力调整
     while (true) {
       while (!queueMotorState.empty()) {
         auto msg = queueMotorState.pop();
@@ -324,7 +333,13 @@ class RLControlDIY : public nodelet::Nodelet {
         robot_data.q_d_(i) = g_rl_interface.output.jntO.q[i];
         robot_data.q_dot_d_(i) = g_rl_interface.output.jntO.qdot_d[i];
         robot_data.tau_d_(i) = g_rl_interface.output.jntO.tor[i];
+        // === 力矩保护 ===
+        if (robot_data.tau_d_(i) > torque_limit)
+            robot_data.tau_d_(i) = torque_limit;
+        else if (robot_data.tau_d_(i) < -torque_limit)
+            robot_data.tau_d_(i) = -torque_limit;
       }
+
 
       bodyctrl_msgs::CmdMotorCtrl msg;
       for (int i = 0; i < 11; i++) {

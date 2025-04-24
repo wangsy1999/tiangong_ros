@@ -63,7 +63,7 @@ std::array<std::array<float, 6>, 2> default_position = {
      { 0.0, 0, -0.165647, 0.529741, -0.301101, 0.}}};  // right
 
 const float stance_T = 0.375;
-const float dt = 0.0025;
+const float dt = 0.001;
 Eigen::Matrix<float, 3, 1> projected_gravity_mat;
 const int policy_frequency = 10;
 float gravity_vec[3] = {0.0, 0.0, -1};
@@ -471,7 +471,7 @@ private:
     
         end_time = this->m_interface->input.time;
 
-        if (((float)(end_time - start_time) / CLOCKS_PER_SEC) > 0.0025) {
+        if (((float)(end_time - start_time) / CLOCKS_PER_SEC) > 0.001) {
         std::cout << "Calling time: "
                     << (float)(end_time - start_time) / CLOCKS_PER_SEC << "s"
                     << std::endl;
