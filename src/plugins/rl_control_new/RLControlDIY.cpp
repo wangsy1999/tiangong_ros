@@ -36,6 +36,12 @@ using namespace broccoli::core;
 
 namespace rl_control_new  // The usage of the namespace is a good practice but not mandatory
 {
+
+  enum class ControlState {
+    IDLE = 0,
+    STAND_INIT = 1,
+    WALK = 2,
+  };
 static Eigen::VectorXd q_d_last = Eigen::VectorXd::Zero(12);
 
 class RLControlDIY : public nodelet::Nodelet {
@@ -43,6 +49,7 @@ class RLControlDIY : public nodelet::Nodelet {
  RLControlDIY() {}
 
  private:
+  ControlState control_state = ControlState::IDLE;
   bool LoadConfig(const std::string& config_file) {
     std::ifstream configFile(config_file.c_str());
     if (!configFile.is_open()) {
@@ -129,7 +136,25 @@ class RLControlDIY : public nodelet::Nodelet {
                   0.0, 0.2618, 0.0, 0.0, 
                   0.0, -0.2618, 0.0, 0.0;
     kp = Eigen::VectorXd::Ones(motor_num) * 50.0;
-    kd = Eigen::VectorXd::Ones(motor_num) * 5.0;
+    kd = Eigen::VectorXd::Ones(motor_num) * 1.0;
+
+    // 左腿
+    kp(0) = 40.0; kd(0) = 4.0;  // Left hip pitch
+    kp(1) = 40.0; kd(1) = 4.0;  // Left hip roll
+    kp(2) = 30.0; kd(2) = 3.0;  // Left hip yaw
+    kp(3) = 50.0; kd(3) = 5.0;  // Left knee
+    kp(4) = 35.0; kd(4) = 3.5;  // Left ankle pitch
+    kp(5) = 35.0; kd(5) = 3.5;  // Left ankle roll
+
+    // 右腿
+    kp(6) = 40.0; kd(6) = 4.0;
+    kp(7) = 40.0; kd(7) = 4.0;
+    kp(8) = 30.0; kd(8) = 3.0;
+    kp(9) = 50.0; kd(9) = 5.0;
+    kp(10) = 35.0; kd(10) = 3.5;
+    kp(11) = 35.0; kd(11) = 3.5;
+
+  
     imu_data = Eigen::VectorXd::Zero(9);
     imu_raw_data = Eigen::VectorXd::Zero(9);
     xsense_data = Eigen::VectorXd::Zero(13);
@@ -178,12 +203,9 @@ class RLControlDIY : public nodelet::Nodelet {
 
   // 混合模式测试
   void rlControl_rlOnly() {
-    // 初始化 RL 控制接口
     static Dcc::INTERFACE_BITBOT::st_interface g_rl_interface;
-
     static Dcc::INTERFACE_BITBOT::c_interface rl_controller(&g_rl_interface);
     rl_controller.init();
-    
 
     Joystick_humanoid joystick_humanoid;
     joystick_humanoid.init();
@@ -191,119 +213,148 @@ class RLControlDIY : public nodelet::Nodelet {
     RobotInterface* robot_interface = get_robot_interface();
     robot_interface->Init();
 
+    Eigen::VectorXd init_pos_leg(12);
+    init_pos_leg << 0.0, 0.0, -0.165, 0.53, -0.30, 0.0,
+                    0.0, 0.0, -0.165, 0.53, -0.30, 0.0;
+
     long count = 0;
     double t_now = 0;
     double dt = 0.001;
 
     while (true) {
-        // === 状态更新（传感器读入） ===
-        while (!queueMotorState.empty()) {
-            auto msg = queueMotorState.pop();
-            for (auto& one : msg->status) {
-                int id = motor_id[one.name];
-                Q_a(id) = one.pos;
-                Qdot_a(id) = one.speed;
-                Tor_a(id) = one.current * ct_scale(id);
-            }
+      while (!queueMotorState.empty()) {
+        auto msg = queueMotorState.pop();
+        for (auto& one : msg->status) {
+          int id = motor_id[one.name];
+          Q_a(id) = one.pos;
+          Qdot_a(id) = one.speed;
+          Tor_a(id) = one.current * ct_scale(id);
         }
-
-        while (!queueImuXsens.empty()) {
-            auto msg = queueImuXsens.pop();
-            xsense_data(0) = msg->euler.yaw;
-            xsense_data(1) = msg->euler.pitch;
-            xsense_data(2) = msg->euler.roll;
-            xsense_data(3) = msg->angular_velocity.x;
-            xsense_data(4) = msg->angular_velocity.y;
-            xsense_data(5) = msg->angular_velocity.z;
-            xsense_data(6) = msg->linear_acceleration.x;
-            xsense_data(7) = msg->linear_acceleration.y;
-            xsense_data(8) = msg->linear_acceleration.z;
-        }
-
-        #ifdef USE_ROS_JOY
-                while (!queueJoyCmd.empty()) {
-                    auto msg = queueJoyCmd.pop();
-                    xbox_map.a = msg->axes[8];
-                    xbox_map.b = msg->axes[9];
-                    xbox_map.c = msg->axes[10];
-                    xbox_map.d = msg->axes[11];
-                    xbox_map.e = msg->axes[4];
-                    xbox_map.f = msg->axes[7];
-                    xbox_map.g = msg->axes[5];
-                    xbox_map.h = msg->axes[6];
-                    xbox_map.x1 = msg->axes[3];
-                    xbox_map.x2 = msg->axes[0];
-                    xbox_map.y1 = msg->axes[2];
-                    xbox_map.y2 = msg->axes[1];
-                }
-        #endif
-
-        t_now = count * dt;
-
-        // === 实际反馈 ===
-        for (int i = 0; i < motor_num; ++i) {
-            q_a(i) = (Q_a(i) - zero_pos(i)) * motor_dir(i) + zero_offset(i);
-            q_a(i) += zero_cnt(i) * 2.0 * pi;
-            qdot_a(i) = Qdot_a(i) * motor_dir(i);
-            tor_a(i) = Tor_a(i) * motor_dir(i);
-        }
-
-        // === 构造 RL 控制器输入 ===
-        xbox_flag flag_ = joystick_humanoid.get_xbox_flag();
-        g_rl_interface.input.time = t_now;
-        for (int i = 0; i < 9; ++i) {
-            g_rl_interface.input.imu[i] = xsense_data(i);
-        }
-        g_rl_interface.input.flag = flag_;
-        for (int i = 0; i < 12; ++i) {
-            g_rl_interface.input.jntI.q[i] = q_a(i);      // 下肢关节位置
-            g_rl_interface.input.jntI.qdot_a[i] = qdot_a(i); // 下肢关节速度
-        }
-
-        // === 调用 RL 控制逻辑 ===
-        rl_controller.run();
-
-        // === 写入 robot_data 控制目标 ===
-        for (int i = 0; i < 11; i++) {
-            robot_data.q_d_(i) = g_rl_interface.output.jntO.q[i];
-            robot_data.q_dot_d_(i) = g_rl_interface.output.jntO.qdot_d[i];
-            //(g_rl_interface.output.jnt.q[i] - q_d_last(i)) / dt;  
-            robot_data.tau_d_(i) = g_rl_interface.output.jntO.tor[i];
-        }
-
-
-        // === 发布电机控制指令 ===
-        bodyctrl_msgs::CmdMotorCtrl msg;
-        for (int i = 0; i < 11; i++) {
-            bodyctrl_msgs::MotorCtrl cmd;
-            cmd.name = motor_name[i];
-            cmd.kp = kp(i);
-            cmd.kd = kd(i);
-            cmd.pos = (robot_data.q_d_(i) - zero_offset(i) - zero_cnt(i) * 2.0 * pi) * motor_dir(i) + zero_pos(i);
-            cmd.spd = robot_data.q_dot_d_(i) * motor_dir(i);
-            cmd.tor = robot_data.tau_d_(i) * motor_dir(i);
-            msg.header.stamp = ros::Time::now();
-            msg.cmds.push_back(cmd);
-        }
-        // 位置模式保持手臂不动
-        for (int i = 12; i < 19; i++) {
-          bodyctrl_msgs::MotorCtrl cmd;
-          cmd.name = motor_name[i];
-          cmd.pos = ( 0- zero_offset(i) - zero_cnt(i) * 2.0 * pi) * motor_dir(i) + zero_pos(i); 
-          cmd.spd = robot_data.q_dot_d_(i) * motor_dir(i);
-          msg.header.stamp = ros::Time::now();
-          msg.cmds.push_back(cmd);
-        }
-
-        pubSetMotorCmd.publish(msg);
-
-        // 保存本次的目标位置，用于下次进行差分计算spd
-        for (int i = 0; i < 12; ++i) {
-          q_d_last(i) = g_rl_interface.output.jntO.q[i];
       }
-        count++;
+
+      while (!queueImuXsens.empty()) {
+        auto msg = queueImuXsens.pop();
+        xsense_data(0) = msg->euler.yaw;
+        xsense_data(1) = msg->euler.pitch;
+        xsense_data(2) = msg->euler.roll;
+        xsense_data(3) = msg->angular_velocity.x;
+        xsense_data(4) = msg->angular_velocity.y;
+        xsense_data(5) = msg->angular_velocity.z;
+        xsense_data(6) = msg->linear_acceleration.x;
+        xsense_data(7) = msg->linear_acceleration.y;
+        xsense_data(8) = msg->linear_acceleration.z;
+      }
+
+      #ifdef USE_ROS_JOY
+      while (!queueJoyCmd.empty()) {
+        auto msg = queueJoyCmd.pop();
+        xbox_map.a = msg->axes[8];
+        xbox_map.b = msg->axes[9];
+        xbox_map.c = msg->axes[10];
+        xbox_map.d = msg->axes[11];
+        xbox_map.e = msg->axes[4];
+        xbox_map.f = msg->axes[7];
+        xbox_map.g = msg->axes[5];
+        xbox_map.h = msg->axes[6];
+        xbox_map.x1 = msg->axes[3];
+        xbox_map.x2 = msg->axes[0];
+        xbox_map.y1 = msg->axes[2];
+        xbox_map.y2 = msg->axes[1];
+      }
+      #endif
+
+      t_now = count * dt;
+
+      for (int i = 0; i < motor_num; ++i) {
+        q_a(i) = (Q_a(i) - zero_pos(i)) * motor_dir(i) + zero_offset(i);
+        q_a(i) += zero_cnt(i) * 2.0 * pi;
+        qdot_a(i) = Qdot_a(i) * motor_dir(i);
+        tor_a(i) = Tor_a(i) * motor_dir(i);
+      }
+
+      xbox_flag flag_ = joystick_humanoid.get_xbox_flag();
+      g_rl_interface.input.time = t_now;
+      for (int i = 0; i < 9; ++i) g_rl_interface.input.imu[i] = xsense_data(i);
+      g_rl_interface.input.flag = flag_;
+      for (int i = 0; i < 12; ++i) {
+        g_rl_interface.input.jntI.q[i] = q_a(i);
+        g_rl_interface.input.jntI.qdot_a[i] = qdot_a(i);
+        g_rl_interface.input.kp[i] = kp(i);
+        g_rl_interface.input.kd[i] = kd(i);
+      }
+      g_rl_interface.input.commands[0] = xbox_map.x2;
+      g_rl_interface.input.commands[1] = xbox_map.y2;
+      g_rl_interface.input.commands[2] = xbox_map.x1;
+
+      // === 状态切换逻辑 ===
+      if (xbox_map.a) {
+        control_state = ControlState::STAND_INIT;
+        std::cout << "[FSM] Switch to STAND_INIT" << std::endl;
+      }
+      if (xbox_map.b) {
+        control_state = ControlState::IDLE;
+        std::cout << "[FSM] Switch to IDLE" << std::endl;
+      }
+      if (xbox_map.c) {
+        control_state = ControlState::WALK;
+        std::cout << "[FSM] Switch to WALK" << std::endl;
+      }
+
+      switch (control_state) {
+        case ControlState::IDLE:
+          for (int i = 0; i < 12; ++i) {
+            g_rl_interface.output.jntO.q[i] = q_a(i);
+            g_rl_interface.output.jntO.qdot_d[i] = 0.0;
+            g_rl_interface.output.jntO.tor[i] = 0.0;
+          }
+          break;
+        case ControlState::STAND_INIT:
+          for (int i = 0; i < 12; ++i) {
+            g_rl_interface.output.jntO.q[i] = init_pos_leg(i);
+            g_rl_interface.output.jntO.qdot_d[i] = 0.0;
+            g_rl_interface.output.jntO.tor[i] = 0.0;
+          }
+          break;
+        case ControlState::WALK:
+          rl_controller.run();
+          break;
+      }
+
+      for (int i = 0; i < 11; i++) {
+        robot_data.q_d_(i) = g_rl_interface.output.jntO.q[i];
+        robot_data.q_dot_d_(i) = g_rl_interface.output.jntO.qdot_d[i];
+        robot_data.tau_d_(i) = g_rl_interface.output.jntO.tor[i];
+      }
+
+      bodyctrl_msgs::CmdMotorCtrl msg;
+      for (int i = 0; i < 11; i++) {
+        bodyctrl_msgs::MotorCtrl cmd;
+        cmd.name = motor_name[i];
+        cmd.kp = kp(i);
+        cmd.kd = kd(i);
+        cmd.pos = (robot_data.q_d_(i) - zero_offset(i) - zero_cnt(i) * 2.0 * pi) * motor_dir(i) + zero_pos(i);
+        cmd.spd = robot_data.q_dot_d_(i) * motor_dir(i);
+        cmd.tor = robot_data.tau_d_(i) * motor_dir(i);
+        msg.header.stamp = ros::Time::now();
+        msg.cmds.push_back(cmd);
+      }
+      for (int i = 12; i < 19; i++) {
+        bodyctrl_msgs::MotorCtrl cmd;
+        cmd.name = motor_name[i];
+        cmd.pos = (0 - zero_offset(i) - zero_cnt(i) * 2.0 * pi) * motor_dir(i) + zero_pos(i);
+        cmd.spd = robot_data.q_dot_d_(i) * motor_dir(i);
+        msg.header.stamp = ros::Time::now();
+        msg.cmds.push_back(cmd);
+      }
+      pubSetMotorCmd.publish(msg);
+
+      for (int i = 0; i < 12; ++i) {
+        q_d_last(i) = g_rl_interface.output.jntO.q[i];
+      }
+      count++;
     }
   }
+
 
 
   void OnMotorStatusMsg(const bodyctrl_msgs::MotorStatusMsg::ConstPtr &msg) {

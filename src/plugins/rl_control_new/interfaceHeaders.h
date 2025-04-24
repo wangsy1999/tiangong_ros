@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <iostream>
 #include "inference_net.hpp"
-#include "Joystick.h"
+//#include "Joystick.h"
 
 #define _JNT_NUM 12
 

@@ -253,10 +253,10 @@ class RLControlNewPlugin : public nodelet::Nodelet {
       
     // kd= Eigen::VectorXd::Ones(18)*1.0;
     double t_now = 0;
-    double dt = 0.0025;
+    double dt = 0.001;
 
     Time start_time;
-    Time period(0, 2500000);
+    Time period(0, 1000000);
     Time sleep2Time;
     Time timer;
     timespec sleep2Time_spec;
