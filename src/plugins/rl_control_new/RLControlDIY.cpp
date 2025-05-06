@@ -1,7 +1,7 @@
 /**
  * @file RLControlDIY.cpp
  * @author Siyuan Wang
- * @brief  RLControlDIY 用于在天工lite上实现开放的强化学习控制器
+ * @brief  RLControlDIY 用于在天工lite上实现强化学习的、开放源代码的控制器节点
  * @date 2025-04-18
  *
  * @copyright Copyright (c) 2025
@@ -31,12 +31,12 @@
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "util/LockFreeQueue.h"
 #include "../x_humanoid_rl_sdk/include/robot_interface/RobotInterface.h"
-// #include "../x_humanoid_rl_sdk/include/robot_FSM/RobotFSM.h"
+
 #include "Joystick.h"
 #include <sensor_msgs/Joy.h>
 #include <geometry_msgs/Twist.h>
-#include "interfaceBitbotNet.hpp"
-#include "interfaceHeaders.h"
+//#include "interfaceBitbotNet.hpp"
+//#include "interfaceHeaders.h"
 
 
 #define DATALOG_MAIN
@@ -52,7 +52,8 @@ namespace rl_control_new  // The usage of the namespace is a good practice but n
     WALK = 2,
   };
 static Eigen::VectorXd q_d_last = Eigen::VectorXd::Zero(12);
-
+constexpr float deg2rad = M_PI / 180.0;
+constexpr float rad2deg = 180.0 / M_PI;
 class RLControlDIY : public nodelet::Nodelet {
  public:
  RLControlDIY() {}
@@ -148,22 +149,29 @@ class RLControlDIY : public nodelet::Nodelet {
     kd = Eigen::VectorXd::Ones(motor_num) * 1.0;
 
     // 左腿
-    kp(0) = 40.0; kd(0) = 4.0;  // Left hip pitch
-    kp(1) = 40.0; kd(1) = 4.0;  // Left hip roll
-    kp(2) = 30.0; kd(2) = 3.0;  // Left hip yaw
-    kp(3) = 50.0; kd(3) = 5.0;  // Left knee
-    kp(4) = 35.0; kd(4) = 3.5;  // Left ankle pitch
-    kp(5) = 35.0; kd(5) = 3.5;  // Left ankle roll
-
+    kp(0) = 150.0; kd(0) = 2.0;  // Left hip pitch
+    kp(1) = 150.0; kd(1) = 2.0;  // Left hip roll
+    kp(2) = 150.0; kd(2) = 2.0;  // Left hip yaw
+    kp(3) = 150.0; kd(3) = 2.0;  // Left knee
+    kp(4) = 15.0;  kd(4) = 1.0;  // Left ankle pitch
+    kp(5) = 15.0;  kd(5) = 1.0;  // Left ankle roll2
     // 右腿
-    kp(6) = 40.0; kd(6) = 4.0;
-    kp(7) = 40.0; kd(7) = 4.0;
-    kp(8) = 30.0; kd(8) = 3.0;
-    kp(9) = 50.0; kd(9) = 5.0;
-    kp(10) = 35.0; kd(10) = 3.5;
-    kp(11) = 35.0; kd(11) = 3.5;
+    kp(6) = 150.0; kd(6)  = 2.0;
+    kp(7) = 150.0; kd(7)  = 2.0;
+    kp(8) = 150.0; kd(8)  = 2.0;
+    kp(9) = 150.0; kd(9)  = 2.0;
+    kp(10) = 15.0; kd(10) = 1.0;
+    kp(11) = 15.0; kd(11) = 1.0;
 
-  
+    kp(12) = 10.0; kd(12) = 1.0;
+    kp(13) = 10.0; kd(13) = 1.0;
+    kp(14) = 10.0; kd(14) = 1.0;
+    kp(15) = 10.0; kd(15) = 1.0;
+    kp(16) = 10.0; kd(16) = 1.0;
+    kp(17) = 10.0; kd(17) = 1.0;
+    kp(18) = 10.0; kd(18) = 1.0;
+    kp(19) = 10.0; kd(19) = 1.0;
+
     imu_data = Eigen::VectorXd::Zero(9);
     imu_raw_data = Eigen::VectorXd::Zero(9);
     xsense_data = Eigen::VectorXd::Zero(13);
@@ -205,6 +213,8 @@ class RLControlDIY : public nodelet::Nodelet {
     subCmdVel = nh.subscribe<geometry_msgs::Twist>("/cmd_vel", 1000, &RLControlDIY::OnCmdVelMsg, this);
 
     sleep(1);
+
+    
     std::thread([this]() {
       rlControl_rlOnly();
     }).detach();
@@ -214,6 +224,20 @@ class RLControlDIY : public nodelet::Nodelet {
   void rlControl_rlOnly() {
     static Dcc::INTERFACE_BITBOT::st_interface g_rl_interface;
     static Dcc::INTERFACE_BITBOT::c_interface rl_controller(&g_rl_interface);
+    const double joint_pos_limits[12][2] = {
+      {-0.97, 0.97},        // hip_roll_l
+      {-1.0472, 1.0472},    // hip_yaw_l
+      {-1.57, 0.1236},      // hip_pitch_l
+      {0.1745, 2.443},      // knee_pitch_l
+      {-1.22, 0.5236},      // ankle_pitch_l
+      {-0.4363, 0.4363},    // ankle_roll_l
+      {-0.97, 0.97},        // hip_roll_r
+      {-1.0472, 1.0472},    // hip_yaw_r
+      {-1.57, 0.1236},      // hip_pitch_r
+      {0.1745, 2.443},      // knee_pitch_r
+      {-1.22, 0.5236},      // ankle_pitch_r
+      {-0.4363, 0.4363}     // ankle_roll_r
+    };
     rl_controller.init();
 
     Joystick_humanoid joystick_humanoid;
@@ -229,7 +253,7 @@ class RLControlDIY : public nodelet::Nodelet {
     long count = 0;
     double t_now = 0;
     double dt = 0.001;
-    const double torque_limit = 100.0;  // 例如最大允许力矩为 60 Nm，根据实际电机能力调整
+
     while (true) {
       while (!queueMotorState.empty()) {
         auto msg = queueMotorState.pop();
@@ -288,8 +312,7 @@ class RLControlDIY : public nodelet::Nodelet {
       for (int i = 0; i < 12; ++i) {
         g_rl_interface.input.jntI.q[i] = q_a(i);
         g_rl_interface.input.jntI.qdot_a[i] = qdot_a(i);
-        g_rl_interface.input.kp[i] = kp(i);
-        g_rl_interface.input.kd[i] = kd(i);
+
       }
       g_rl_interface.input.commands[0] = xbox_map.x2;
       g_rl_interface.input.commands[1] = xbox_map.y2;
@@ -311,17 +334,16 @@ class RLControlDIY : public nodelet::Nodelet {
 
       switch (control_state) {
         case ControlState::IDLE:
-          for (int i = 0; i < 12; ++i) {
+          for (int i = 0; i < 11; i++) {
             g_rl_interface.output.jntO.q[i] = q_a(i);
-            g_rl_interface.output.jntO.qdot_d[i] = 0.0;
-            g_rl_interface.output.jntO.tor[i] = 0.0;
+
+            
           }
           break;
         case ControlState::STAND_INIT:
-          for (int i = 0; i < 12; ++i) {
+          for (int i = 0; i < 11; i++) {
             g_rl_interface.output.jntO.q[i] = init_pos_leg(i);
-            g_rl_interface.output.jntO.qdot_d[i] = 0.0;
-            g_rl_interface.output.jntO.tor[i] = 0.0;
+
           }
           break;
         case ControlState::WALK:
@@ -331,14 +353,20 @@ class RLControlDIY : public nodelet::Nodelet {
 
       for (int i = 0; i < 11; i++) {
         robot_data.q_d_(i) = g_rl_interface.output.jntO.q[i];
-        robot_data.q_dot_d_(i) = g_rl_interface.output.jntO.qdot_d[i];
-        robot_data.tau_d_(i) = g_rl_interface.output.jntO.tor[i];
-        // === 力矩保护 ===
-        if (robot_data.tau_d_(i) > torque_limit)
-            robot_data.tau_d_(i) = torque_limit;
-        else if (robot_data.tau_d_(i) < -torque_limit)
-            robot_data.tau_d_(i) = -torque_limit;
+
+
+      //关节超限保护
+        double joint_pos = robot_data.q_d_(i);  // 弧度
+        if (joint_pos < joint_pos_limits[i][0] || joint_pos > joint_pos_limits[i][1]) {
+            for (int j = 0; i < motor_num; ++j) {
+              robot_data.tau_d_(j) = 0.0;
+            }
+            control_state = ControlState::IDLE;
+          ROS_WARN_THROTTLE(2.0, "Joint %d exceeds limit [%.3f, %.3f], torque set to 0.", i,
+                                  joint_pos_limits[i][0], joint_pos_limits[i][1]);
+          }
       }
+
 
 
       bodyctrl_msgs::CmdMotorCtrl msg;
@@ -348,24 +376,27 @@ class RLControlDIY : public nodelet::Nodelet {
         cmd.kp = kp(i);
         cmd.kd = kd(i);
         cmd.pos = (robot_data.q_d_(i) - zero_offset(i) - zero_cnt(i) * 2.0 * pi) * motor_dir(i) + zero_pos(i);
-        cmd.spd = robot_data.q_dot_d_(i) * motor_dir(i);
-        cmd.tor = robot_data.tau_d_(i) * motor_dir(i);
+        cmd.spd = 0;
+        cmd.tor = 0;
         msg.header.stamp = ros::Time::now();
         msg.cmds.push_back(cmd);
       }
+
+
       for (int i = 12; i < 19; i++) {
         bodyctrl_msgs::MotorCtrl cmd;
         cmd.name = motor_name[i];
+        cmd.kp = kp(i);
+        cmd.kd = kd(i);
         cmd.pos = (0 - zero_offset(i) - zero_cnt(i) * 2.0 * pi) * motor_dir(i) + zero_pos(i);
-        cmd.spd = robot_data.q_dot_d_(i) * motor_dir(i);
+
+        cmd.spd = 0;
+        cmd.tor = 0;
         msg.header.stamp = ros::Time::now();
         msg.cmds.push_back(cmd);
       }
       pubSetMotorCmd.publish(msg);
 
-      for (int i = 0; i < 12; ++i) {
-        q_d_last(i) = g_rl_interface.output.jntO.q[i];
-      }
       count++;
     }
   }

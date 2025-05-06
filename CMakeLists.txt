@@ -2,8 +2,10 @@ cmake_minimum_required(VERSION 3.0.2)
 project(rl_control_new)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-add_compile_options(-std=c++17)
+add_compile_options(-std=c++20)
 
+find_package(OpenVINO REQUIRED)
+find_package(yaml-cpp REQUIRED)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
@@ -16,7 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   bodyctrl_msgs
   message_generation
 )
-
+set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};/opt/intel/openvino_2025.1.0/runtime/cmake")
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -128,9 +130,13 @@ include_directories(
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/plugins/JoyStick/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/plugins/x_humanoid_rl_sdk/include"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/plugins/x_humanoid_rl_sdk/include/libtorch/include"
+  #"${CMAKE_CURRENT_SOURCE_DIR}/src/plugins/x_humanoid_rl_sdk/include/libtorch/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/plugins/x_humanoid_rl_sdk/include/robot_interface"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/plugins/x_humanoid_rl_sdk/include/robotFSM"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/plugins/rl_control_new"
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/ovinf/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/ovinf/include/ovinf
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/ovinf/include/ovinf/utils
 )
 link_directories("/usr/local/lib")
 INCLUDE_DIRECTORIES ( "/usr/local/include")
@@ -158,16 +164,31 @@ link_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/plugins/x_humanoid_rl_sdk/lib)
 ## The recommended prefix ensures that target names across packages don't collide
 #add_executable(${PROJECT_NAME}_node src/MotionTestNode.cpp)
 add_library(rlctrlnew_plugin
-  src/plugins/rl_control_new/RLControlDIY.cpp
-  src/plugins/rl_control_new/leeMatrix.c
-  src/plugins/rl_control_new/leeMatrix.h
-  src/plugins/rl_control_new/parallel_ankle.hpp
-  src/plugins/rl_control_new/interfaceHeaders.h
-  src/plugins/rl_control_new/inference_net.hpp
-  src/plugins/rl_control_new/interfaceBitbotNet.hpp
-  src/plugins/rl_control_new/ZenBuffer.hpp
-
+  # src/plugins/rl_control_new/RLControlDIY.cpp
+  src/plugins/rl_control_new/AnkleTest.cpp
+  # src/plugins/rl_control_new/parallel_ankle.hpp
+  # src/plugins/rl_control_new/interfaceHeaders.h
+  # src/plugins/rl_control_new/inference_net.hpp
+  # src/plugins/rl_control_new/interfaceBitbotNet.hpp
+  # src/plugins/rl_control_new/ZenBuffer.hpp
   src/plugins/JoyStick/src/Joystick.cpp
+)
+
+add_library(ovinf SHARED
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/ovinf/src/ovinf/ovinf_humanoid.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/ovinf/src/ovinf/ovinf_humanoid_stand.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/ovinf/src/utils/priority.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/ovinf/src/utils/stick_core.c
+)
+
+target_include_directories(ovinf PUBLIC
+  ${OpenVINO_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+)
+
+target_link_libraries(ovinf
+  openvino::runtime
+  yaml-cpp
 )
 
 ## Rename C++ executable without prefix
@@ -179,6 +200,7 @@ add_library(rlctrlnew_plugin
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+# add_library(src/plugins/rl_control_new/reset.cpp)
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(rlctrlnew_plugin
@@ -187,7 +209,9 @@ target_link_libraries(rlctrlnew_plugin
   ${catkin_LIBRARIES}
   x_humanoid_rl_sdk
   fmt
+  ovinf 
 )
+
 
 #############
 ## Install ##
