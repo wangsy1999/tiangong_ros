@@ -178,6 +178,7 @@ private:
         qdot_a = Eigen::VectorXd::Zero(motor_num_);
         tor_a = Eigen::VectorXd::Zero(motor_num_);
         q_d = Eigen::VectorXd::Zero(motor_num_);
+        q_d1 = Eigen::VectorXd::Zero(motor_num_);
         qdot_d = Eigen::VectorXd::Zero(motor_num_);
         tor_d = Eigen::VectorXd::Zero(motor_num_);
 
@@ -317,14 +318,18 @@ private:
         q_d.segment(0, 12) = result.value();
     
         Eigen::VectorXf Q_d = Eigen::VectorXf::Zero(motor_num_);
-        Q_d.segment(0, 12) = q_d.segment(0, 12);
+        q_d1.segment(0, 12) = q_d.segment(0, 12);
         auto mot_l = left_ankle_.InverseKinematics(q_d(4), q_d(5));                
         auto mot_r = right_ankle_.InverseKinematics(q_d(10), q_d(11));
-        Q_d(4)  = mot_l(0);
-        Q_d(5)  = mot_l(1);
-        Q_d(10) = mot_r(1);
-        Q_d(11) = mot_r(0);
-    
+        q_d1(4)  = mot_l(0);
+        q_d1(5)  = mot_l(1);
+        q_d1(10) = mot_r(1);
+        q_d1(11) = mot_r(0);
+
+
+      for (int i = 0; i < 12; i++) {
+        Q_d(i)=(q_d1(i) - zero_offset_(i)) * motor_dir_(i);
+      }
         bodyctrl_msgs::CmdMotorCtrl msg_out;
         msg_out.header.stamp = ros::Time::now();
         for (int i = 0; i < 12; i++) {
@@ -332,7 +337,7 @@ private:
             cmd.name = motor_name[i];
             cmd.kp = kp(i);
             cmd.kd = kd(i);
-            cmd.pos = (q_d(i) - zero_offset_(i)) * motor_dir_(i);
+            cmd.pos = Q_d(i);
             cmd.spd = 0;
             cmd.tor = 0;
             msg_out.cmds.push_back(cmd);
@@ -523,6 +528,7 @@ private:
     Eigen::VectorXd qdot_a;
     Eigen::VectorXd tor_a;
     Eigen::VectorXd q_d;
+    Eigen::VectorXd q_d1;
     Eigen::VectorXd qdot_d;
     Eigen::VectorXd tor_d;
     Eigen::VectorXd Q_a;
