@@ -57,7 +57,7 @@ private:
         auto& nh = getPrivateNodeHandle();
 
         InitParams();
-
+       
         pub_motor_cmd_ = nh.advertise<bodyctrl_msgs::CmdMotorCtrl>("/BodyControl/motor_ctrl", 1000);
         sub_motor_state_ = nh.subscribe("/BodyControl/motor_state", 1000, &AnkleTestNodelet::OnMotorState, this);
         sub_joy_ = nh.subscribe("/sbus_data", 1000, &AnkleTestNodelet::OnJoyReceived, this);
@@ -66,6 +66,16 @@ private:
 
         YAML::Node config = YAML::LoadFile("/home/wsy/Library/ovinf/config/humanoid.yaml");
         policy_ = std::make_shared<ovinf::HumanoidPolicy>(config["inference"]);
+
+
+        infer_timer_ = nh.createTimer(
+            ros::Duration(0.01),  // 10ms
+            &RLControlNewPlugin::InferTimerCallback, 
+            this, 
+            false,  // 不自动启动
+            false   // 需要后续调用 start()
+        );
+
         NODELET_INFO("AnkleTestNodelet initialized.");
     }
 
@@ -112,7 +122,7 @@ private:
         this->right_ankle_ = ParallelAnkle<float>(this->right_params_, 1e-6f);
         
         this->left_ankle_ = ParallelAnkle<float>(left_params_, 1e-6f);
-        
+        proj_gravity_ = VectorT::Zero(3);
         YAML::Node config =
         YAML::LoadFile("/home/wsy/Library/ovinf/config/humanoid.yaml");
         auto policy = ovinf::PolicyFactory::CreatePolicy(config["inference"]);
@@ -190,60 +200,54 @@ private:
         ROS_INFO_STREAM_THROTTLE(1.5, "[Right Ankle FK] pitch = " << fk_right(0)  * 180.0 / M_PI << ", roll = " << fk_right(1)  * 180.0 / M_PI);
 
         input.command = last_cmd_vel_.cast<float>();
-        input.ang_vel = last_imu_ang_vel_.cast<float>();
-        input.proj_gravity = last_imu_gravity_.cast<float>();
+
         input.joint_pos = q_a.cast<float>();
         input.joint_vel = qdot_a.cast<float>();
-    
+
+        while (!queueImuXsens.empty()) {
+            auto msg = queueImuXsens.pop();
+            // set xsens imu buf
+            xsense_data(0) = msg->euler.yaw;
+            xsense_data(1) = msg->euler.pitch;
+            xsense_data(2) = msg->euler.roll;
+            xsense_data(3) = msg->angular_velocity.x;
+            xsense_data(4) = msg->angular_velocity.y;
+            xsense_data(5) = msg->angular_velocity.z;
+            xsense_data(6) = msg->linear_acceleration.x;
+            xsense_data(7) = msg->linear_acceleration.y;
+            xsense_data(8) = msg->linear_acceleration.z;
+          }
+
+        last_imu_ang_vel_ << msg->angular_velocity.x,
+          msg->angular_velocity.y,
+          msg->angular_velocity.z;
+
+        input.ang_vel = last_imu_ang_vel_.cast<float>();  
+        euler_rpy_ << xsense_data(0),  
+          xsense_data(1),  
+          xsense_data(2);  
+
+        // 这是 proj_gravity_ 的计算
+        Eigen::Matrix3f Rwb(
+            Eigen::AngleAxisf(euler_rpy_[0], Eigen::Vector3f::UnitZ()) *
+            Eigen::AngleAxisf(euler_rpy_[1], Eigen::Vector3f::UnitY()) *
+            Eigen::AngleAxisf(euler_rpy_[2], Eigen::Vector3f::UnitX()));
+        input.proj_gravity_ =
+            VectorT(Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0});
+
+
+
         switch (state_) {
 
-            // 推理频率还没控制，考虑current_time - last infer time 来实现，数据采集部分，如cmd和imu相关部分还没弄，推理部分WarmUp和Infer的用法还有待检查
             case TestState::INFER: {
-                static bool is_first_infer = true;
-                static size_t warmup_counter = 0;
-                const size_t warmup_iters = 20;
-              
-                if (is_first_infer && warmup_counter < warmup_iters) {
-                  policy_->WarmUp(input, 1);
-                  warmup_counter++;
-                  return;
+                static bool entered = false;
+                if (!entered) {
+                    entered = true;
+                    warmup_counter_ = 0;
+                    is_first_infer_ = true;
+                    infer_timer_.start();  // 启动定时推理
+                    NODELET_INFO("[FSM] Entering INFER state, timer started");
                 }
-              
-                is_first_infer = false;
-                NODELET_INFO_ONCE("[FSM] Entering INFER state");
-              
-                policy_->InferUnsync(input);
-                auto result = policy_->GetResult();
-                if (!result.has_value()) return;
-            
-                Eigen::VectorXf q_d = Eigen::VectorXf::Zero(motor_num_);
-                q_d.segment(0, 12) = result.value();
-
-                //区分了一下变量
-                Eigen::VectorXf Q_d = Eigen::VectorXf::Zero(motor_num_);
-                Q_d.segment(0, 12) = q_d.segment(0, 12);
-                auto mot_l = left_ankle_.InverseKinematics(q_d(4), q_d(5));                
-                auto mot_r = right_ankle_.InverseKinematics(q_d(10), q_d(11));
-                Q_d(4)  = mot_l(0);
-                Q_d(5)  = mot_l(1);
-                Q_d(10) = mot_r(1); //右边是先1后0
-                Q_d(11) = mot_r(0);
-                 
-                // --- 6. 电机命令下发 ---
-                bodyctrl_msgs::CmdMotorCtrl msg_out;
-                msg_out.header.stamp = ros::Time::now();
-
-                for (int i = 0; i < 12; i++) {
-                    bodyctrl_msgs::MotorCtrl cmd;
-                    cmd.name = motor_name[i];
-                    cmd.kp = kp(i);
-                    cmd.kd = kd(i);
-                    cmd.pos = (q_d(i) - zero_offset_(i)) * motor_dir_(i) ;
-                    cmd.spd = 0;
-                    cmd.tor = 0;
-                    msg_out.cmds.push_back(cmd);
-                }
-                pub_motor_cmd_.publish(msg_out);
                 break;
             }
 
@@ -263,15 +267,62 @@ private:
               break;
         }
      }
+
+
+
+     void InferTimerCallback(const ros::TimerEvent&) {
+        static bool is_first_infer = true;
+        static size_t warmup_counter = 0;
+        const size_t warmup_iters = 20;
+    
+        if (is_first_infer && warmup_counter < warmup_iters) {
+            policy_->WarmUp(input, 1);
+            warmup_counter++;
+            return;
+        }
+    
+        is_first_infer = false;
+    
+        policy_->InferUnsync(input);
+        auto result = policy_->GetResult();
+        if (!result.has_value()) return;
+    
+        Eigen::VectorXf q_d = Eigen::VectorXf::Zero(motor_num_);
+        q_d.segment(0, 12) = result.value();
+    
+        Eigen::VectorXf Q_d = Eigen::VectorXf::Zero(motor_num_);
+        Q_d.segment(0, 12) = q_d.segment(0, 12);
+        auto mot_l = left_ankle_.InverseKinematics(q_d(4), q_d(5));                
+        auto mot_r = right_ankle_.InverseKinematics(q_d(10), q_d(11));
+        Q_d(4)  = mot_l(0);
+        Q_d(5)  = mot_l(1);
+        Q_d(10) = mot_r(1);
+        Q_d(11) = mot_r(0);
+    
+        bodyctrl_msgs::CmdMotorCtrl msg_out;
+        msg_out.header.stamp = ros::Time::now();
+        for (int i = 0; i < 12; i++) {
+            bodyctrl_msgs::MotorCtrl cmd;
+            cmd.name = motor_name[i];
+            cmd.kp = kp(i);
+            cmd.kd = kd(i);
+            cmd.pos = (q_d(i) - zero_offset_(i)) * motor_dir_(i);
+            cmd.spd = 0;
+            cmd.tor = 0;
+            msg_out.cmds.push_back(cmd);
+        }
+        pub_motor_cmd_.publish(msg_out);
+    }
+    
      void OnMotorStatusMsg(const bodyctrl_msgs::MotorStatusMsg::ConstPtr &msg) {
         auto wrapper = msg;
         queueMotorState.push(wrapper);
       }
     
-      void OnImuStatusMsg(const bodyctrl_msgs::Imu::ConstPtr &msg) {
-        auto wrapper = msg;
-        queueImuRm.push(wrapper);
-      }
+    //   void OnImuStatusMsg(const bodyctrl_msgs::Imu::ConstPtr &msg) {
+    //     auto wrapper = msg;
+    //     queueImuRm.push(wrapper);
+    //   }
     
       void OnXsensImuStatusMsg(const bodyctrl_msgs::Imu::ConstPtr& msg)
       {
@@ -420,7 +471,8 @@ private:
     ros::Publisher pub_motor_cmd_;
     ros::Subscriber sub_motor_state_;
     ros::Subscriber sub_joy_;
-
+    ros::NodeHandle nh;
+    ros::Timer infer_timer_;
     // State
     TestState state_ = TestState::IDLE;
     xbox_map_t xbox_map_;
@@ -480,7 +532,7 @@ private:
     LockFreeQueue<bodyctrl_msgs::Imu::ConstPtr> queueImuXsens;
     LockFreeQueue<sensor_msgs::Joy::ConstPtr> queueJoyCmd;
     LockFreeQueue<geometry_msgs::Twist::ConstPtr> queueCmdVel;
-
+    VectorT proj_gravity_;
 
 };
 
