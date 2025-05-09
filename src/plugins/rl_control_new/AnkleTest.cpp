@@ -197,7 +197,7 @@ private:
         int id = 0;
         for (const auto& motor : msg->status) {
              id = motor_id[motor.name];
-             Q_a(id) = one.pos;
+             Q_a(id) = motor.pos;
              Qdot_a(id) = motor.speed;
              Tor_a(id) = motor.current*ct_scale(id);
  
