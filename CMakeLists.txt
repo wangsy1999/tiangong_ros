@@ -4,7 +4,7 @@ project(rl_control_new)
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++20)
 
-find_package(OpenVINO REQUIRED)
+
 find_package(yaml-cpp REQUIRED)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -19,6 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
 )
 set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};/opt/intel/openvino_2025.1.0/runtime/cmake")
+find_package(OpenVINO REQUIRED)
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 

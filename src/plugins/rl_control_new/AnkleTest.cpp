@@ -70,7 +70,7 @@ private:
 
         infer_timer_ = nh.createTimer(
             ros::Duration(0.01),  // 10ms
-            &RLControlNewPlugin::InferTimerCallback, 
+            &AnkleTestNodelet::InferTimerCallback, 
             this, 
             false,  // 不自动启动
             false   // 需要后续调用 start()
@@ -122,7 +122,8 @@ private:
         this->right_ankle_ = ParallelAnkle<float>(this->right_params_, 1e-6f);
         
         this->left_ankle_ = ParallelAnkle<float>(left_params_, 1e-6f);
-        proj_gravity_ = VectorT::Zero(3);
+        proj_gravity_ = Eigen::Vector3f::Zero();
+
         YAML::Node config =
         YAML::LoadFile("/home/wsy/Library/ovinf/config/humanoid.yaml");
         auto policy = ovinf::PolicyFactory::CreatePolicy(config["inference"]);
@@ -166,6 +167,10 @@ private:
         imu_raw_data = Eigen::VectorXd::Zero(9);
         xsense_data = Eigen::VectorXd::Zero(13);
         data = Eigen::VectorXd::Zero(350);
+        // AnkleTestNodelet 类的 private 区域添加：
+        size_t warmup_counter_ = 0;
+        bool is_first_infer_ = true;
+
     }
 
 
@@ -205,22 +210,23 @@ private:
         input.joint_vel = qdot_a.cast<float>();
 
         while (!queueImuXsens.empty()) {
-            auto msg = queueImuXsens.pop();
+            auto imu_msg = queueImuXsens.pop();
             // set xsens imu buf
-            xsense_data(0) = msg->euler.yaw;
-            xsense_data(1) = msg->euler.pitch;
-            xsense_data(2) = msg->euler.roll;
-            xsense_data(3) = msg->angular_velocity.x;
-            xsense_data(4) = msg->angular_velocity.y;
-            xsense_data(5) = msg->angular_velocity.z;
-            xsense_data(6) = msg->linear_acceleration.x;
-            xsense_data(7) = msg->linear_acceleration.y;
-            xsense_data(8) = msg->linear_acceleration.z;
+            xsense_data(0) = imu_msg->euler.yaw;
+            xsense_data(1) = imu_msg->euler.pitch;
+            xsense_data(2) = imu_msg->euler.roll;
+            xsense_data(3) = imu_msg->angular_velocity.x;
+            xsense_data(4) = imu_msg->angular_velocity.y;
+            xsense_data(5) = imu_msg->angular_velocity.z;
+            xsense_data(6) = imu_msg->linear_acceleration.x;
+            xsense_data(7) = imu_msg->linear_acceleration.y;
+            xsense_data(8) = imu_msg->linear_acceleration.z;
+            last_imu_ang_vel_ << imu_msg->angular_velocity.x,
+            imu_msg->angular_velocity.y,
+            imu_msg->angular_velocity.z;
           }
 
-        last_imu_ang_vel_ << msg->angular_velocity.x,
-          msg->angular_velocity.y,
-          msg->angular_velocity.z;
+ 
 
         input.ang_vel = last_imu_ang_vel_.cast<float>();  
         euler_rpy_ << xsense_data(0),  
@@ -232,8 +238,8 @@ private:
             Eigen::AngleAxisf(euler_rpy_[0], Eigen::Vector3f::UnitZ()) *
             Eigen::AngleAxisf(euler_rpy_[1], Eigen::Vector3f::UnitY()) *
             Eigen::AngleAxisf(euler_rpy_[2], Eigen::Vector3f::UnitX()));
-        input.proj_gravity_ =
-            VectorT(Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0});
+        input.proj_gravity =
+            (Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0});
 
 
 
@@ -490,7 +496,8 @@ private:
 
     // fast_ros::Subscriber subImu, subImuXsens;
     ros::Subscriber subImu, subImuXsens;
-
+    size_t warmup_counter_;
+    bool is_first_infer_;
     ros::Subscriber subCmdVel;
     Eigen::VectorXd q_a;
     Eigen::VectorXd qdot_a;
@@ -532,7 +539,9 @@ private:
     LockFreeQueue<bodyctrl_msgs::Imu::ConstPtr> queueImuXsens;
     LockFreeQueue<sensor_msgs::Joy::ConstPtr> queueJoyCmd;
     LockFreeQueue<geometry_msgs::Twist::ConstPtr> queueCmdVel;
-    VectorT proj_gravity_;
+    Eigen::Vector3f proj_gravity_;
+    Eigen::Vector3f euler_rpy_;
+
 
 };
 
