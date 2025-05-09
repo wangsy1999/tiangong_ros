@@ -197,7 +197,7 @@ private:
         int id = 0;
         for (const auto& motor : msg->status) {
              id = motor_id[motor.name];
-            latest_motor_pos_[motor.name] = motor.pos;
+             Q_a(id) = one.pos;
              Qdot_a(id) = motor.speed;
              Tor_a(id) = motor.current*ct_scale(id);
  
@@ -205,16 +205,20 @@ private:
  
         
         for (int i = 0; i < motor_num_; i++) {
-             q_a(i) = (latest_motor_pos_[i] - zero_pos(i)) * motor_dir(i) + zero_offset(i);
+             q_a(i) = (Q_a(i) - zero_pos(i)) * motor_dir(i) + zero_offset(i);
              qdot_a(i) = Qdot_a(i) * motor_dir(i);
              tor_a(i) = Tor_a(i) * motor_dir(i);
         }
+
+
+
         auto fk_left = left_ankle_.ForwardKinematics(q_a(4), q_a(5));
         auto fk_right = right_ankle_.ForwardKinematics(q_a(11), q_a(10)); //顺序很重要
         q_a(4) = fk_left(0);
         q_a(5) = fk_left(1);
         q_a(10) = fk_right(0);
         q_a(11) = fk_right(1);
+
 
         
         ROS_INFO_STREAM_THROTTLE(1.5, "[Left Ankle FK] pitch = " << fk_left(0)  * 180.0 / M_PI << ", roll = " << fk_left(1)  * 180.0 / M_PI);
@@ -425,7 +429,7 @@ private:
        static Eigen::VectorXd start_pos(12);
        if (!initialized_reset_) {
            for (int i = 0; i < 12; i++)
-               start_pos(i) = latest_motor_pos_[motor_name[i]];
+               start_pos(i) = Q_a(i);
            reset_step = 0;
            initialized_reset_ = true;
        }
@@ -502,7 +506,7 @@ private:
     int motor_num_;
     Eigen::VectorXd motor_dir_, zero_cnt_, zero_offset_, init_pos_;
     std::map<int, int> motor_id, motor_name;
-    std::unordered_map<int, float> latest_motor_pos_;
+    // std::unordered_map<int, float> latest_motor_pos_;
     ParallelAnkle<float>::AnkleParameters left_params_;
     ParallelAnkle<float>::AnkleParameters right_params_;
     ParallelAnkle<float> left_ankle_;
