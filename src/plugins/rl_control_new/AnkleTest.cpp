@@ -167,9 +167,6 @@ private:
         imu_raw_data = Eigen::VectorXd::Zero(9);
         xsense_data = Eigen::VectorXd::Zero(13);
         data = Eigen::VectorXd::Zero(350);
-        // AnkleTestNodelet 类的 private 区域添加：
-        size_t warmup_counter_ = 0;
-        bool is_first_infer_ = true;
 
     }
 
@@ -187,9 +184,9 @@ private:
  
         }
  
- 
+        
         for (int i = 0; i < motor_num_; i++) {
-             q_a(i) = (Q_a(i) - zero_pos(i)) * motor_dir(i) + zero_offset(i);
+             q_a(i) = (latest_motor_pos_[i] - zero_pos(i)) * motor_dir(i) + zero_offset(i);
              qdot_a(i) = Qdot_a(i) * motor_dir(i);
              tor_a(i) = Tor_a(i) * motor_dir(i);
         }
