@@ -167,6 +167,25 @@ private:
         imu_raw_data = Eigen::VectorXd::Zero(9);
         xsense_data = Eigen::VectorXd::Zero(13);
         data = Eigen::VectorXd::Zero(350);
+        Q_a = Eigen::VectorXd::Zero(motor_num_);
+        Qdot_a = Eigen::VectorXd::Zero(motor_num_);
+        Tor_a = Eigen::VectorXd::Zero(motor_num_);
+        Q_d = Eigen::VectorXd::Zero(motor_num_);
+        Qdot_d = Eigen::VectorXd::Zero(motor_num_);
+        Tor_d = Eigen::VectorXd::Zero(motor_num_);
+
+        q_a = Eigen::VectorXd::Zero(motor_num_);
+        qdot_a = Eigen::VectorXd::Zero(motor_num_);
+        tor_a = Eigen::VectorXd::Zero(motor_num_);
+        q_d = Eigen::VectorXd::Zero(motor_num_);
+        qdot_d = Eigen::VectorXd::Zero(motor_num_);
+        tor_d = Eigen::VectorXd::Zero(motor_num_);
+
+        Q_a_last = Eigen::VectorXd::Zero(motor_num_);
+        // Qdot_a_last = Eigen::VectorXd::Zero(motor_num_);
+        // Tor_a_last = Eigen::VectorXd::Zero(motor_num_);
+        ct_scale = Eigen::VectorXd::Ones(motor_num_);
+
 
     }
 
@@ -506,8 +525,8 @@ private:
     Eigen::VectorXd Qdot_a;
     Eigen::VectorXd Tor_a;
     Eigen::VectorXd Q_a_last;
-    Eigen::VectorXd Qdot_a_last;
-    Eigen::VectorXd Tor_a_last;
+    // Eigen::VectorXd Qdot_a_last;
+    // Eigen::VectorXd Tor_a_last;
     Eigen::VectorXd Q_d;
     Eigen::VectorXd Qdot_d;
     Eigen::VectorXd Tor_d;
