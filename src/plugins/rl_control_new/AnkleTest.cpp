@@ -68,13 +68,21 @@ private:
         policy = std::make_shared<ovinf::HumanoidPolicy>(config["inference"]);
 
 
-        infer_timer = nh.createTimer(
-            ros::Duration(0.01),  // 10ms
-            &AnkleTestNodelet::InferTimerCallback, 
-            this, 
-            false,  // 不自动启动
-            false   // 需要后续调用 start()
-        );
+        // infer_timer = nh.createTimer(
+        //     ros::Duration(0.01),  // 10ms
+        //     &AnkleTestNodelet::InferTimerCallback, 
+        //     this, 
+        //     false,  // 不自动启动
+        //     false   // 需要后续调用 start()
+        // );
+        std::thread([this]() {
+            ros::Rate rate(100);  // 100 Hz
+            while (ros::ok()) {
+                RunFSM();  // 调用你的状态机主逻辑
+                rate.sleep();
+            }
+        }).detach();
+
 
         NODELET_INFO("AnkleTestNodelet initialized.");
     }
@@ -130,6 +138,7 @@ private:
 
         kp = Eigen::VectorXd::Ones(motor_num) * 50.0;
         kd = Eigen::VectorXd::Ones(motor_num) * 5.0;
+        // 在 AnkleTestNodelet 类中添加
 
         // 记得修改
         kp << 200.0, 200.0, 200.0, 200.0, 15.0, 15.0,
@@ -224,14 +233,88 @@ private:
         ROS_INFO_STREAM_THROTTLE(1.5, "[Left Ankle FK] pitch = " << fk_left(0)  * 180.0 / M_PI << ", roll = " << fk_left(1)  * 180.0 / M_PI);
         ROS_INFO_STREAM_THROTTLE(1.5, "[Right Ankle FK] pitch = " << fk_right(0)  * 180.0 / M_PI << ", roll = " << fk_right(1)  * 180.0 / M_PI);
 
-        input.command = last_cmd_vel.cast<float>();
+        // input.command = last_cmd_vel.cast<float>();
 
+        // input.joint_pos = q_a.cast<float>();
+        // input.joint_vel = qdot_a.cast<float>();
+
+        // while (!queueImuXsens.empty()) {
+        //     auto imu_msg = queueImuXsens.pop();
+        //     // set xsens imu buf
+        //     xsense_data(0) = imu_msg->euler.yaw;
+        //     xsense_data(1) = imu_msg->euler.pitch;
+        //     xsense_data(2) = imu_msg->euler.roll;
+        //     xsense_data(3) = imu_msg->angular_velocity.x;
+        //     xsense_data(4) = imu_msg->angular_velocity.y;
+        //     xsense_data(5) = imu_msg->angular_velocity.z;
+        //     xsense_data(6) = imu_msg->linear_acceleration.x;
+        //     xsense_data(7) = imu_msg->linear_acceleration.y;
+        //     xsense_data(8) = imu_msg->linear_acceleration.z;
+        //     last_imu_ang_vel << imu_msg->angular_velocity.x,
+        //     imu_msg->angular_velocity.y,
+        //     imu_msg->angular_velocity.z;
+        //   }
+
+ 
+
+        // input.ang_vel = last_imu_ang_vel.cast<float>();  
+        // euler_rpy << xsense_data(0), 
+        //   xsense_data(1),  
+        //   xsense_data(2);  
+
+        // // 这是 proj_gravity_ 的计算
+        // Eigen::Matrix3f Rwb(
+        //     Eigen::AngleAxisf(euler_rpy[0], Eigen::Vector3f::UnitZ()) *
+        //     Eigen::AngleAxisf(euler_rpy[1], Eigen::Vector3f::UnitY()) *
+        //     Eigen::AngleAxisf(euler_rpy[2], Eigen::Vector3f::UnitX()));
+        // input.proj_gravity =
+        //     (Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0});
+
+
+
+        // switch (state) {
+
+        //     case TestState::INFER: {
+        //         static bool entered = false;
+        //         if (!entered) {
+        //             entered = true;
+        //             warmup_counter = 0;
+        //             is_first_infer = true;
+        //             infer_timer.start();  // 启动定时推理
+        //             NODELET_INFO("[FSM] Entering INFER state, timer started");
+        //         }
+        //         break;
+        //     }
+
+        //     case TestState::FULL_RESET:{
+        //       NODELET_INFO_ONCE("[FSM] Entering FULL_RESET state");
+        //       FullReset();
+        //       break;
+        //     }
+
+        //     case TestState::STOP:{
+        //       NODELET_INFO_ONCE("[FSM] Entering STOP state");
+        //       StopAll();
+        //       break;
+        //     }
+
+        //     default:
+        //       break;
+        // }
+     }
+
+
+     void RunFSM() {
+        // joystick 命令
+        input.command = last_cmd_vel.cast<float>();
+    
+        // 关节状态（由 OnMotorState 设置后用于推理）
         input.joint_pos = q_a.cast<float>();
         input.joint_vel = qdot_a.cast<float>();
-
+    
+        // 处理最新 IMU 数据
         while (!queueImuXsens.empty()) {
             auto imu_msg = queueImuXsens.pop();
-            // set xsens imu buf
             xsense_data(0) = imu_msg->euler.yaw;
             xsense_data(1) = imu_msg->euler.pitch;
             xsense_data(2) = imu_msg->euler.roll;
@@ -242,65 +325,50 @@ private:
             xsense_data(7) = imu_msg->linear_acceleration.y;
             xsense_data(8) = imu_msg->linear_acceleration.z;
             last_imu_ang_vel << imu_msg->angular_velocity.x,
-            imu_msg->angular_velocity.y,
-            imu_msg->angular_velocity.z;
-          }
-
- 
-
-        input.ang_vel = last_imu_ang_vel.cast<float>();  
-        euler_rpy << xsense_data(0), 
-          xsense_data(1),  
-          xsense_data(2);  
-
-        // 这是 proj_gravity_ 的计算
+                                 imu_msg->angular_velocity.y,
+                                 imu_msg->angular_velocity.z;
+        }
+    
+        input.ang_vel = last_imu_ang_vel.cast<float>();
+    
+        // 重力投影计算
+        euler_rpy << xsense_data(0), xsense_data(1), xsense_data(2);
         Eigen::Matrix3f Rwb(
             Eigen::AngleAxisf(euler_rpy[0], Eigen::Vector3f::UnitZ()) *
             Eigen::AngleAxisf(euler_rpy[1], Eigen::Vector3f::UnitY()) *
             Eigen::AngleAxisf(euler_rpy[2], Eigen::Vector3f::UnitX()));
-        input.proj_gravity =
-            (Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0});
-
-
-
+        input.proj_gravity = Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0};
+    
+        // 状态机行为控制
         switch (state) {
-
             case TestState::INFER: {
                 static bool entered = false;
                 if (!entered) {
                     entered = true;
                     warmup_counter = 0;
                     is_first_infer = true;
-                    infer_timer.start();  // 启动定时推理
-                    NODELET_INFO("[FSM] Entering INFER state, timer started");
+                    NODELET_INFO("[FSM] Entering INFER state, infer loop running");
                 }
+                StepInference();
+            
                 break;
             }
-
-            case TestState::FULL_RESET:{
-              NODELET_INFO_ONCE("[FSM] Entering FULL_RESET state");
-              FullReset();
-              break;
+            case TestState::FULL_RESET: {
+                NODELET_INFO_ONCE("[FSM] Entering FULL_RESET state");
+                FullReset();
+                break;
             }
-
-            case TestState::STOP:{
-              NODELET_INFO_ONCE("[FSM] Entering STOP state");
-              StopAll();
-              break;
+            case TestState::STOP: {
+                NODELET_INFO_ONCE("[FSM] Entering STOP state");
+                StopAll();
+                break;
             }
-
             default:
-              break;
+                break;
         }
-     }
-
-
-
-     void InferTimerCallback(const ros::TimerEvent&) {
-        static bool is_first_infer = true;
-        static size_t warmup_counter = 0;
-        const size_t warmup_iters = 20;
+    }
     
+    void StepInference() {
         if (is_first_infer && warmup_counter < warmup_iters) {
             policy->WarmUp(input, 1);
             warmup_counter++;
@@ -318,6 +386,8 @@ private:
     
         Eigen::VectorXf Q_d = Eigen::VectorXf::Zero(motor_num);
         Q_d.segment(0, 12) = q_d.segment(0, 12);
+    
+        // 脚踝 IK 解算
         auto mot_l = left_ankle.InverseKinematics(q_d(4), q_d(5));                
         auto mot_r = right_ankle.InverseKinematics(q_d(10), q_d(11));
         Q_d(4)  = mot_l(0);
@@ -337,6 +407,7 @@ private:
             cmd.tor = 0;
             msg_out.cmds.push_back(cmd);
         }
+    
         pub_motor_cmd.publish(msg_out);
     }
     
@@ -535,8 +606,8 @@ private:
 
     // fast_ros::Subscriber subImu, subImuXsens;
     ros::Subscriber subImu, subImuXsens;
-    size_t warmup_counter;
-    bool is_first_infer;
+    //size_t warmup_counter;
+    //bool is_first_infer;
     ros::Subscriber subCmdVel;
     Eigen::VectorXd q_a;
     Eigen::VectorXd qdot_a;
@@ -579,6 +650,9 @@ private:
     LockFreeQueue<geometry_msgs::Twist::ConstPtr> queueCmdVel;
     // Eigen::Vector3f proj_gravity_;
     Eigen::Vector3f euler_rpy;
+    bool is_first_infer = true;
+    size_t warmup_counter = 0;
+    const size_t warmup_iters = 20;
 
 
 };
