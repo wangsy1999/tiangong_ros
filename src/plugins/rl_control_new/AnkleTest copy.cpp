@@ -17,7 +17,7 @@ ToDo:
 #include <sensor_msgs/Joy.h>
 #include <Eigen/Dense>
 #include "parallel_ankle.hpp"
-
+#include "Joystick.h"
 namespace rl_control_new {
 
 class AnkleTestNodelet : public nodelet::Nodelet {
