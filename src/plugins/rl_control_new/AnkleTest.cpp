@@ -132,6 +132,8 @@ private:
         this->left_ankle = ParallelAnkle<float>(left_params, 1e-6f);
         // proj_gravity = Eigen::Vector3f::Zero();
 
+
+
         YAML::Node config =
         YAML::LoadFile("/home/wsy/Library/ovinf/config/humanoid.yaml");
         auto policy = ovinf::PolicyFactory::CreatePolicy(config["inference"]);
@@ -172,8 +174,7 @@ private:
             motor_id.insert({motor_name[i], i});
         }
 
-        imu_data = Eigen::VectorXd::Zero(9);
-        imu_raw_data = Eigen::VectorXd::Zero(9);
+
         xsense_data = Eigen::VectorXd::Zero(13);
         data = Eigen::VectorXd::Zero(350);
         Q_a = Eigen::VectorXd::Zero(motor_num);
@@ -182,7 +183,6 @@ private:
         Q_d = Eigen::VectorXd::Zero(motor_num);
         Qdot_d = Eigen::VectorXd::Zero(motor_num);
         Tor_d = Eigen::VectorXd::Zero(motor_num);
-
         q_a = Eigen::VectorXd::Zero(motor_num);
         qdot_a = Eigen::VectorXd::Zero(motor_num);
         tor_a = Eigen::VectorXd::Zero(motor_num);
@@ -190,16 +190,17 @@ private:
         qdot_d = Eigen::VectorXd::Zero(motor_num);
         tor_d = Eigen::VectorXd::Zero(motor_num);
         euler_rpy =Eigen::VectorXf::Zero(3);
-        Q_a_last = Eigen::VectorXd::Zero(motor_num);
-        // Qdot_a_last = Eigen::VectorXd::Zero(motor_num);
-        // Tor_a_last = Eigen::VectorXd::Zero(motor_num);
         ct_scale = Eigen::VectorXd::Ones(motor_num);
 
+        ct_scale << 2.5, 2.1, 2.5, 2.5, 1.4, 1.4, 
+        2.5, 2.1, 2.5, 2.5, 1.4, 1.4, 
+        1.4, 1.4, 1.4, 1.4, 
+        1.4, 1.4, 1.4, 1.4;
 
     }
 
 
-
+// 获取电机状态 + 数据处理
     void OnMotorState(const bodyctrl_msgs::MotorStatusMsg::ConstPtr& msg) {
         float q_left_pitch = 0.0f, q_left_roll = 0.0f;
         float q_right_pitch = 0.0f, q_right_roll = 0.0f;
@@ -209,17 +210,13 @@ private:
              Q_a(id) = motor.pos;
              Qdot_a(id) = motor.speed;
              Tor_a(id) = motor.current*ct_scale(id);
- 
         }
  
-        
         for (int i = 0; i < motor_num; i++) {
              q_a(i) = Q_a(i) * motor_dir(i) + zero_offset(i);
              qdot_a(i) = Qdot_a(i) * motor_dir(i);
              tor_a(i) = Tor_a(i) * motor_dir(i);
         }
-
-
 
         auto fk_left = left_ankle.ForwardKinematics(q_a(4), q_a(5));
         auto fk_right = right_ankle.ForwardKinematics(q_a(11), q_a(10)); //顺序很重要
@@ -228,79 +225,8 @@ private:
         q_a(10) = fk_right(0);
         q_a(11) = fk_right(1);
 
-
-        
         ROS_INFO_STREAM_THROTTLE(1.5, "[Left Ankle FK] pitch = " << fk_left(0)  * 180.0 / M_PI << ", roll = " << fk_left(1)  * 180.0 / M_PI);
         ROS_INFO_STREAM_THROTTLE(1.5, "[Right Ankle FK] pitch = " << fk_right(0)  * 180.0 / M_PI << ", roll = " << fk_right(1)  * 180.0 / M_PI);
-
-        // input.command = last_cmd_vel.cast<float>();
-
-        // input.joint_pos = q_a.cast<float>();
-        // input.joint_vel = qdot_a.cast<float>();
-
-        // while (!queueImuXsens.empty()) {
-        //     auto imu_msg = queueImuXsens.pop();
-        //     // set xsens imu buf
-        //     xsense_data(0) = imu_msg->euler.yaw;
-        //     xsense_data(1) = imu_msg->euler.pitch;
-        //     xsense_data(2) = imu_msg->euler.roll;
-        //     xsense_data(3) = imu_msg->angular_velocity.x;
-        //     xsense_data(4) = imu_msg->angular_velocity.y;
-        //     xsense_data(5) = imu_msg->angular_velocity.z;
-        //     xsense_data(6) = imu_msg->linear_acceleration.x;
-        //     xsense_data(7) = imu_msg->linear_acceleration.y;
-        //     xsense_data(8) = imu_msg->linear_acceleration.z;
-        //     last_imu_ang_vel << imu_msg->angular_velocity.x,
-        //     imu_msg->angular_velocity.y,
-        //     imu_msg->angular_velocity.z;
-        //   }
-
- 
-
-        // input.ang_vel = last_imu_ang_vel.cast<float>();  
-        // euler_rpy << xsense_data(0), 
-        //   xsense_data(1),  
-        //   xsense_data(2);  
-
-        // // 这是 proj_gravity_ 的计算
-        // Eigen::Matrix3f Rwb(
-        //     Eigen::AngleAxisf(euler_rpy[0], Eigen::Vector3f::UnitZ()) *
-        //     Eigen::AngleAxisf(euler_rpy[1], Eigen::Vector3f::UnitY()) *
-        //     Eigen::AngleAxisf(euler_rpy[2], Eigen::Vector3f::UnitX()));
-        // input.proj_gravity =
-        //     (Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0});
-
-
-
-        // switch (state) {
-
-        //     case TestState::INFER: {
-        //         static bool entered = false;
-        //         if (!entered) {
-        //             entered = true;
-        //             warmup_counter = 0;
-        //             is_first_infer = true;
-        //             infer_timer.start();  // 启动定时推理
-        //             NODELET_INFO("[FSM] Entering INFER state, timer started");
-        //         }
-        //         break;
-        //     }
-
-        //     case TestState::FULL_RESET:{
-        //       NODELET_INFO_ONCE("[FSM] Entering FULL_RESET state");
-        //       FullReset();
-        //       break;
-        //     }
-
-        //     case TestState::STOP:{
-        //       NODELET_INFO_ONCE("[FSM] Entering STOP state");
-        //       StopAll();
-        //       break;
-        //     }
-
-        //     default:
-        //       break;
-        // }
      }
 
 
@@ -470,7 +396,7 @@ private:
         }
         if (xbox_map.c > 0.5f) {
             state = TestState::FULL_RESET;
-            initialized_reset_ = false;
+            initialized_reset = false;
             ROS_INFO("[FSM] C -> FULL RESET");
         }
         if (xbox_map.d > 0.5f) {
@@ -515,16 +441,16 @@ private:
        static int reset_step = 0;
        const int total_steps = 10;
        static Eigen::VectorXd start_pos(12);
-       if (!initialized_reset_) {
+       if (!initialized_reset) {
            for (int i = 0; i < 12; i++)
                start_pos(i) = Q_a(i);
            reset_step = 0;
-           initialized_reset_ = true;
+           initialized_reset = true;
        }
 
        if (reset_step > total_steps) {
            state = TestState::IDLE;
-           initialized_reset_ = false;
+           initialized_reset = false;
            return;
        }
 
@@ -592,22 +518,24 @@ private:
     xbox_map_t xbox_map;
     float pi;
     int motor_num;
-    Eigen::VectorXd motor_dir;
-
-    Eigen::VectorXd  init_pos;
+    bool initialized_reset = false;
+    float x_speed_command = 0.;  
+    float y_speed_command = 0.;  
+    float yaw_speed_command = 0.;
+    bool is_first_infer ;
+    size_t warmup_counter;
+    const size_t warmup_iters = 20;
     std::map<int, int> motor_id, motor_name;
     // std::unordered_map<int, float> latest_motor_pos_;
     ParallelAnkle<float>::AnkleParameters left_params;
     ParallelAnkle<float>::AnkleParameters right_params;
     ParallelAnkle<float> left_ankle;
     ParallelAnkle<float> right_ankle;
-    bool initialized_reset_ = false;
-
 
     // fast_ros::Subscriber subImu, subImuXsens;
+    Eigen::VectorXd motor_dir;
+    Eigen::VectorXd  init_pos;
     ros::Subscriber subImu, subImuXsens;
-    //size_t warmup_counter;
-    //bool is_first_infer;
     ros::Subscriber subCmdVel;
     Eigen::VectorXd q_a;
     Eigen::VectorXd qdot_a;
@@ -618,29 +546,19 @@ private:
     Eigen::VectorXd Q_a;
     Eigen::VectorXd Qdot_a;
     Eigen::VectorXd Tor_a;
-    Eigen::VectorXd Q_a_last;
-    // Eigen::VectorXd Qdot_a_last;
-    // Eigen::VectorXd Tor_a_last;
     Eigen::VectorXd Q_d;
     Eigen::VectorXd Qdot_d;
     Eigen::VectorXd Tor_d;
     Eigen::VectorXd ct_scale;
     Eigen::VectorXd data;
-    Eigen::VectorXd zero_pos;
     Eigen::VectorXd zero_offset;
-
     Eigen::VectorXd zero_cnt;
-    Eigen::VectorXd imu_raw_data;
-    Eigen::VectorXd imu_data;
     Eigen::VectorXd xsense_data;
     Eigen::VectorXd kp;
     Eigen::VectorXd kd;
-    float x_speed_command = 0.;  
-    float y_speed_command = 0.;  
-    float yaw_speed_command = 0.;
+    Eigen::Vector3f euler_rpy;
     Eigen::Vector3f last_cmd_vel;
     Eigen::Vector3f last_imu_ang_vel;
-    // Eigen::Vector3f last_imu_gravity_;
     std::shared_ptr<ovinf::HumanoidPolicy> policy;
     ovinf::ProprioceptiveObservation<float> input;
     LockFreeQueue<bodyctrl_msgs::MotorStatusMsg::ConstPtr> queueMotorState;
@@ -648,11 +566,6 @@ private:
     LockFreeQueue<bodyctrl_msgs::Imu::ConstPtr> queueImuXsens;
     LockFreeQueue<sensor_msgs::Joy::ConstPtr> queueJoyCmd;
     LockFreeQueue<geometry_msgs::Twist::ConstPtr> queueCmdVel;
-    // Eigen::Vector3f proj_gravity_;
-    Eigen::Vector3f euler_rpy;
-    bool is_first_infer = true;
-    size_t warmup_counter = 0;
-    const size_t warmup_iters = 20;
 
 
 };
