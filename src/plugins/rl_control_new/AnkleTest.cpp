@@ -47,7 +47,7 @@ private:
         STOP
     };
 
-    struct xbox_mapt {
+    struct xbox_map_t {
         float a = 0, b = 0, c = 0, d = 0;
         float e = 0, f = 0, g = 0, h = 0;
         float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
