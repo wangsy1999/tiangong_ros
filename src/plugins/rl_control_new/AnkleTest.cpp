@@ -32,6 +32,10 @@ ToDo:
 #include "ovinf/ovinf_factory.hpp"
 #include "ovinf/ovinf_humanoid.h"  // 或其他定义 PolicyInput 的头文件
 #include <geometry_msgs/Twist.h>
+#include "filter.hpp"
+
+
+
 namespace rl_control_new {
 
 class AnkleTestNodelet : public nodelet::Nodelet {
@@ -67,18 +71,10 @@ private:
         YAML::Node config = YAML::LoadFile("/home/wsy/Library/ovinf/config/humanoid.yaml");
         policy = std::make_shared<ovinf::HumanoidPolicy>(config["inference"]);
 
-
-        // infer_timer = nh.createTimer(
-        //     ros::Duration(0.01),  // 10ms
-        //     &AnkleTestNodelet::InferTimerCallback, 
-        //     this, 
-        //     false,  // 不自动启动
-        //     false   // 需要后续调用 start()
-        // );
         std::thread([this]() {
             ros::Rate rate(100);  // 100 Hz
             while (ros::ok()) {
-                RunFSM();  // 调用你的状态机主逻辑
+                RunFSM();  
                 rate.sleep();
             }
         }).detach();
@@ -197,6 +193,12 @@ private:
         1.4, 1.4, 1.4, 1.4, 
         1.4, 1.4, 1.4, 1.4;
 
+
+        filter_joint_pos = EMAFilter<Eigen::VectorXf>(0.05f);
+        filter_joint_vel = EMAFilter<Eigen::VectorXf>(0.1f);
+        filter_ang_vel = EMAFilter<Eigen::Vector3f>(0.1f);
+        filter_proj_gravity = EMAFilter<Eigen::Vector3f>(0.1f);  // alpha 越小越平滑
+
     }
 
 
@@ -235,8 +237,8 @@ private:
         input.command = last_cmd_vel.cast<float>();
     
         // 关节状态（由 OnMotorState 设置后用于推理）
-        input.joint_pos = q_a.cast<float>();
-        input.joint_vel = qdot_a.cast<float>();
+        //input.joint_pos = q_a.cast<float>();
+        //input.joint_vel = qdot_a.cast<float>();
     
         // 处理最新 IMU 数据
         while (!queueImuXsens.empty()) {
@@ -255,16 +257,21 @@ private:
                                  imu_msg->angular_velocity.z;
         }
     
-        input.ang_vel = last_imu_ang_vel.cast<float>();
-    
+        //input.ang_vel = last_imu_ang_vel.cast<float>();
+        input.joint_pos = filter_joint_pos.filter(q_a.cast<float>());
+        input.joint_vel = filter_joint_vel.filter(qdot_a.cast<float>());
+        input.ang_vel   = filter_ang_vel.filter(last_imu_ang_vel.cast<float>());
         // 重力投影计算
         euler_rpy << xsense_data(0), xsense_data(1), xsense_data(2);
         Eigen::Matrix3f Rwb(
             Eigen::AngleAxisf(euler_rpy[0], Eigen::Vector3f::UnitZ()) *
             Eigen::AngleAxisf(euler_rpy[1], Eigen::Vector3f::UnitY()) *
             Eigen::AngleAxisf(euler_rpy[2], Eigen::Vector3f::UnitX()));
-        input.proj_gravity = Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0};
-    
+        Eigen::Vector3f raw_proj_gravity = Rwb.transpose() * Eigen::Vector3f{0.0f, 0.0f, -1.0f};
+        input.proj_gravity = filter_proj_gravity.filter(raw_proj_gravity);
+        // input.proj_gravity = Rwb.transpose() * Eigen::Vector3f{0.0, 0.0, -1.0};
+
+
         // 状态机行为控制
         switch (state) {
             case TestState::INFER: {
@@ -321,20 +328,22 @@ private:
         Q_d(10) = mot_r(1);
         Q_d(11) = mot_r(0);
     
-        bodyctrl_msgs::CmdMotorCtrl msg_out;
-        msg_out.header.stamp = ros::Time::now();
-        for (int i = 0; i < 12; i++) {
-            bodyctrl_msgs::MotorCtrl cmd;
-            cmd.name = motor_name[i];
-            cmd.kp = kp(i);
-            cmd.kd = kd(i);
-            cmd.pos = (Q_d(i) - zero_offset(i)) * motor_dir(i);
-            cmd.spd = 0;
-            cmd.tor = 0;
-            msg_out.cmds.push_back(cmd);
-        }
+
+        
+        // bodyctrl_msgs::CmdMotorCtrl msg_out;
+        // msg_out.header.stamp = ros::Time::now();
+        // for (int i = 0; i < 12; i++) {
+        //     bodyctrl_msgs::MotorCtrl cmd;
+        //     cmd.name = motor_name[i];
+        //     cmd.kp = kp(i);
+        //     cmd.kd = kd(i);
+        //     cmd.pos = (Q_d(i) - zero_offset(i)) * motor_dir(i);
+        //     cmd.spd = 0;
+        //     cmd.tor = 0;
+        //     msg_out.cmds.push_back(cmd);
+        // }
     
-        pub_motor_cmd.publish(msg_out);
+        // pub_motor_cmd.publish(msg_out);
     }
     
      void OnMotorStatusMsg(const bodyctrl_msgs::MotorStatusMsg::ConstPtr &msg) {
@@ -566,7 +575,10 @@ private:
     LockFreeQueue<bodyctrl_msgs::Imu::ConstPtr> queueImuXsens;
     LockFreeQueue<sensor_msgs::Joy::ConstPtr> queueJoyCmd;
     LockFreeQueue<geometry_msgs::Twist::ConstPtr> queueCmdVel;
-
+    EMAFilter<Eigen::VectorXf> filter_joint_pos;
+    EMAFilter<Eigen::VectorXf> filter_joint_vel;
+    EMAFilter<Eigen::Vector3f> filter_ang_vel;
+    EMAFilter<Eigen::Vector3f> filter_proj_gravity;
 
 };
 
